@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Efficient Machine — Prototype</title>
+<style>
+  :root{--bg:#071018;--panel:#0d1721;--panel2:#111f2b;--text:#eaf7ff;--muted:#7f96a7;--accent:#79f2d0;--line:#203342;--danger:#ff7e79;--gold:#ffd66b}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:radial-gradient(circle at 50% -10%,#133044 0,#071018 45%,#04090e 100%);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  body{display:flex;justify-content:center}
+  .app{width:min(100vw,760px);height:100dvh;display:grid;grid-template-rows:auto auto 1fr auto auto;gap:8px;padding:10px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .brand{font-weight:900;letter-spacing:.14em;font-size:14px}.brand span{color:var(--accent)}
+  .mini{font-size:11px;color:var(--muted)}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .stat{background:linear-gradient(180deg,rgba(17,31,43,.96),rgba(10,19,27,.96));border:1px solid #18303e;border-radius:12px;padding:8px 10px;min-width:0}
+  .stat b{display:block;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stat small{color:var(--muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+  .boardWrap{position:relative;min-height:0;background:linear-gradient(180deg,#0b1721,#08121a);border:1px solid #173141;border-radius:18px;overflow:hidden;box-shadow:0 18px 60px #0008}
+  canvas{width:100%;height:100%;display:block;touch-action:manipulation}
+  .toast{position:absolute;left:50%;top:14px;transform:translate(-50%,-8px);padding:8px 12px;border-radius:999px;background:#102738e8;border:1px solid #2d5568;color:#dff8ff;font-size:12px;font-weight:800;opacity:0;pointer-events:none;transition:.2s}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .goal{display:flex;align-items:center;gap:8px;padding:0 2px;font-size:11px;color:var(--muted)}
+  .bar{height:7px;flex:1;background:#0d1a23;border-radius:999px;overflow:hidden;border:1px solid #16303e}.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4bd5b5,#b4ffe8);transition:width .25s}
+  .tools{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  button{font:inherit;color:var(--text);background:linear-gradient(180deg,#112330,#0b1720);border:1px solid #1c3948;border-radius:13px;min-height:55px;padding:6px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  button.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset,0 0 24px #69eacb22;background:#12342f}
+  button:active{transform:translateY(1px)}
+  button strong{display:block;font-size:20px;line-height:20px} button span{display:block;margin-top:4px;font-size:9px;color:var(--muted);letter-spacing:.04em}
+  .foot{display:flex;justify-content:space-between;align-items:center;gap:8px}.help{font-size:10px;color:var(--muted);line-height:1.25}.reset{min-height:34px;padding:4px 10px;font-size:10px;flex:0 0 auto}
+  @media(max-width:520px){.app{padding:7px;gap:6px}.stat{padding:7px 8px}.stat b{font-size:14px}.tools button{min-height:52px}.help{font-size:9px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top"><div><div class="brand">EFFICIENT <span>MACHINE</span></div><div class="mini">Turn 1.0/s into something absurd.</div></div><button id="clearBtn" class="reset">NEW MACHINE</button></div>
+  <div class="stats">
+    <div class="stat"><b id="out">0.0/s</b><small>Output</small></div>
+    <div class="stat"><b id="best">0.0/s</b><small>Best</small></div>
+    <div class="stat"><b id="energy">0</b><small>Total energy</small></div>
+    <div class="stat"><b id="active">0</b><small>Particles</small></div>
+  </div>
+  <div class="boardWrap"><canvas id="game"></canvas><div class="toast" id="toast"></div></div>
+  <div class="goal"><span id="goalText">Target 10/s</span><div class="bar"><i id="goalFill"></i></div><span id="rank">STARTER</span></div>
+  <div class="tools">
+    <button data-tool="mirror" class="active"><strong>／</strong><span>MIRROR ×8</span></button>
+    <button data-tool="split"><strong>Y</strong><span>SPLIT ×3</span></button>
+    <button data-tool="double"><strong>×2</strong><span>DOUBLE ×3</span></button>
+    <button data-tool="boost"><strong>»</strong><span>BOOST ×2</span></button>
+    <button data-tool="erase"><strong>×</strong><span>ERASE</span></button>
+  </div>
+  <div class="foot"><div class="help">Choose a module → tap an empty cell. Tap a placed mirror/splitter to rotate it. Route particles back into the collector.</div><button id="hintBtn" class="reset">HINT</button></div>
+</div>
+<script>
+(() => {
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const outEl=document.getElementById('out'),bestEl=document.getElementById('best'),energyEl=document.getElementById('energy'),activeEl=document.getElementById('active');
+const toastEl=document.getElementById('toast'),goalFill=document.getElementById('goalFill'),goalText=document.getElementById('goalText'),rankEl=document.getElementById('rank');
+const COLS=11,ROWS=8,SOURCE={c:0,r:3},COLLECTOR={c:10,r:3};
+const START_INV={mirror:8,split:3,double:3,boost:2};
+let inv={...START_INV},selected='mirror',placed=new Map(),particles=[],trailBursts=[],last=performance.now(),spawnAcc=0,totalEnergy=0,best=0,currentRate=0,toastTimer=0;
+const collected=[]; const STEP_MS=82,SPAWN_MS=650,MAX_PARTICLES=220,TTL=90;
+let metrics={x:0,y:0,cell:40,w:0,h:0,dpr:1};
+const dirs=[[1,0],[0,1],[-1,0],[0,-1]];
+
+function key(c,r){return c+','+r}
+function save(){try{localStorage.setItem('efficient_machine_v01',JSON.stringify({placed:[...placed.entries()],inv,totalEnergy,best}))}catch(e){}}
+function load(){try{const s=JSON.parse(localStorage.getItem('efficient_machine_v01')||'null');if(!s)return;placed=new Map(s.placed||[]);inv={...START_INV,...(s.inv||{})};totalEnergy=+s.totalEnergy||0;best=+s.best||0}catch(e){}}
+load();
+
+function resize(){const rect=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2.5);canvas.width=Math.max(1,Math.round(rect.width*dpr));canvas.height=Math.max(1,Math.round(rect.height*dpr));metrics.dpr=dpr;const pad=16;metrics.cell=Math.min((rect.width-pad*2)/COLS,(rect.height-pad*2)/ROWS);metrics.w=metrics.cell*COLS;metrics.h=metrics.cell*ROWS;metrics.x=(rect.width-metrics.w)/2;metrics.y=(rect.height-metrics.h)/2}
+new ResizeObserver(resize).observe(canvas);resize();
+
+function showToast(t){toastEl.textContent=t;toastEl.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1000)}
+function vibrate(ms=18){try{navigator.vibrate?.(ms)}catch(e){}}
+let audioCtx=null;function beep(freq=620,dur=.045,gain=.025){try{audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=freq;g.gain.setValueAtTime(gain,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(.0001,audioCtx.currentTime+dur);o.connect(g).connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur)}catch(e){}}
+
+function componentAt(c,r){return placed.get(key(c,r))}
+function setComponent(c,r,type,rot=0){placed.set(key(c,r),{type,rot});save()}
+function removeComponent(c,r){const k=key(c,r),p=placed.get(k);if(!p)return;if(inv[p.type]!=null)inv[p.type]++;placed.delete(k);save();updateTools()}
+
+function updateTools(){document.querySelectorAll('[data-tool]').forEach(b=>{const t=b.dataset.tool;b.classList.toggle('active',selected===t);const label=b.querySelector('span');if(t==='erase')label.textContent='ERASE';else label.textContent=({mirror:'MIRROR',split:'SPLIT',double:'DOUBLE',boost:'BOOST'})[t]+' ×'+inv[t]})}
+updateTools();
+document.querySelectorAll('[data-tool]').forEach(b=>b.onclick=()=>{selected=b.dataset.tool;updateTools();beep(360,.025,.012)});
+
+function cellFromEvent(ev){const rect=canvas.getBoundingClientRect(),x=(ev.clientX??ev.touches?.[0]?.clientX)-rect.left,y=(ev.clientY??ev.touches?.[0]?.clientY)-rect.top;const c=Math.floor((x-metrics.x)/metrics.cell),r=Math.floor((y-metrics.y)/metrics.cell);return {c,r}}
+canvas.addEventListener('pointerdown',e=>{audioCtx?.resume?.();const {c,r}=cellFromEvent(e);if(c<0||c>=COLS||r<0||r>=ROWS)return;if((c===SOURCE.c&&r===SOURCE.r)||(c===COLLECTOR.c&&r===COLLECTOR.r))return;const old=componentAt(c,r);if(selected==='erase'){removeComponent(c,r);return}
+ if(old){if(old.type==='mirror'||old.type==='split'){old.rot=(old.rot+1)%2;save();beep(440,.025,.015)}else showToast('This module does not rotate');return}
+ if((inv[selected]||0)<=0){showToast('No modules left');return} inv[selected]--;setComponent(c,r,selected,0);updateTools();beep(510,.025,.014)});
+canvas.addEventListener('contextmenu',e=>{e.preventDefault();const {c,r}=cellFromEvent(e);removeComponent(c,r)});
+
+function spawn(){if(particles.length>=MAX_PARTICLES)return;particles.push({c:SOURCE.c+0.15,r:SOURCE.r,dir:0,value:1,ttl:TTL,phase:0,boost:1,dead:false})}
+function reflect(dir,rot){
+  if(rot===0)return [3,2,1,0][dir];
+  return [1,0,3,2][dir];
+}
+function rotateDir(dir,delta){return (dir+delta+4)%4}
+function enterCell(p,c,r){
+ const comp=componentAt(c,r);if(!comp)return;
+ if(comp.type==='mirror')p.dir=reflect(p.dir,comp.rot);
+ else if(comp.type==='double'){p.value=Math.min(p.value*2,64);burst(c,r,'double')}
+ else if(comp.type==='boost'){p.boost=Math.min(p.boost*1.55,5);burst(c,r,'boost')}
+ else if(comp.type==='split'){
+   if(particles.length<MAX_PARTICLES-1){const branch={...p,dir:rotateDir(p.dir,comp.rot===0?1:-1),ttl:p.ttl-1,phase:0};particles.push(branch);burst(c,r,'split')}
+ }
+}
+function burst(c,r,type){trailBursts.push({c,r,life:1,type})}
+
+function update(dt,now){spawnAcc+=dt;while(spawnAcc>=SPAWN_MS){spawnAcc-=SPAWN_MS;spawn()}
+ for(const p of particles){p.phase+=dt*p.boost;if(p.phase>=STEP_MS){const n=Math.min(3,Math.floor(p.phase/STEP_MS));p.phase%=STEP_MS;for(let i=0;i<n&&!p.dead;i++)simulateSingle(p)}}
+ particles=particles.filter(p=>!p.dead);
+ while(collected.length&&now-collected[0].t>5000)collected.shift();currentRate=collected.reduce((s,x)=>s+x.v,0)/5;if(currentRate>best){best=currentRate;save()}
+ for(const b of trailBursts)b.life-=dt/420;trailBursts=trailBursts.filter(b=>b.life>0);
+}
+function simulateSingle(p){p.ttl--;if(p.ttl<=0){p.dead=true;return}const d=dirs[p.dir],nc=Math.round(p.c)+d[0],nr=Math.round(p.r)+d[1];if(nc===COLLECTOR.c&&nr===COLLECTOR.r){const v=p.value;totalEnergy+=v;collected.push({t:performance.now(),v});burst(COLLECTOR.c,COLLECTOR.r,'collect');p.dead=true;if(v>=8){beep(860,.035,.01);vibrate(10)}return}if(nc<0||nc>=COLS||nr<0||nr>=ROWS){p.dead=true;return}p.c=nc;p.r=nr;enterCell(p,nc,nr)}
+
+function px(c){return metrics.x+(c+.5)*metrics.cell}function py(r){return metrics.y+(r+.5)*metrics.cell}
+function roundedRect(x,y,w,h,r){const rr=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath()}
+function draw(){const d=metrics.dpr;ctx.setTransform(d,0,0,d,0,0);ctx.clearRect(0,0,canvas.width/d,canvas.height/d);ctx.lineCap='round';ctx.lineJoin='round';
+ for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const x=metrics.x+c*metrics.cell,y=metrics.y+r*metrics.cell;ctx.fillStyle=((c+r)&1)?'#0b1821':'#0c1b25';roundedRect(x+1,y+1,metrics.cell-2,metrics.cell-2,6);ctx.fill();ctx.strokeStyle='#142b38';ctx.lineWidth=1;ctx.stroke()}
+ ctx.strokeStyle='#244658';ctx.setLineDash([4,6]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px(SOURCE.c),py(SOURCE.r));ctx.lineTo(px(COLLECTOR.c),py(COLLECTOR.r));ctx.stroke();ctx.setLineDash([]);
+ drawPort(SOURCE.c,SOURCE.r,true);drawPort(COLLECTOR.c,COLLECTOR.r,false);
+ for(const [k,p] of placed){const [c,r]=k.split(',').map(Number);drawComponent(c,r,p)}
+ for(const p of particles){const [dx,dy]=dirs[p.dir];const t=Math.min(1,p.phase/STEP_MS),x=px(p.c)+dx*t*metrics.cell*.78,y=py(p.r)+dy*t*metrics.cell*.78;const rad=Math.max(2.4,Math.min(7,3+Math.log2(p.value+1)*.8));const g=ctx.createRadialGradient(x,y,0,x,y,rad*3);g.addColorStop(0,'#ecfff9');g.addColorStop(.32,'#79f2d0');g.addColorStop(1,'#79f2d000');ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,rad*3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ecfff9';ctx.beginPath();ctx.arc(x,y,rad,0,Math.PI*2);ctx.fill();if(p.value>1){ctx.fillStyle='#071018';ctx.font=`700 ${Math.max(7,metrics.cell*.14)}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(p.value,x,y+.5)}}
+ for(const b of trailBursts){const a=Math.max(0,b.life),rad=metrics.cell*(.25+(1-a)*.55);ctx.strokeStyle=`rgba(121,242,208,${a*.65})`;ctx.lineWidth=2;ctx.beginPath();ctx.arc(px(b.c),py(b.r),rad,0,Math.PI*2);ctx.stroke()}
+}
+function drawPort(c,r,source){const x=px(c),y=py(r),s=metrics.cell;ctx.save();ctx.shadowBlur=20;ctx.shadowColor=source?'#79f2d0':'#ffd66b';ctx.fillStyle=source?'#79f2d0':'#ffd66b';ctx.beginPath();ctx.arc(x,y,s*.22,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#061017';ctx.font=`900 ${s*.24}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(source?'▶':'◎',x,y);ctx.restore()}
+function drawComponent(c,r,p){const x=px(c),y=py(r),s=metrics.cell*.38;ctx.save();ctx.translate(x,y);ctx.strokeStyle='#d8f8ff';ctx.fillStyle='#0b2630';ctx.lineWidth=Math.max(2,metrics.cell*.065);ctx.shadowBlur=10;ctx.shadowColor='#6debd044';ctx.beginPath();ctx.roundRect?.(-s,-s,s*2,s*2,8);if(ctx.roundRect){ctx.fill();ctx.stroke()}else{roundedRect(x-s,y-s,s*2,s*2,8);ctx.fill();ctx.stroke()}
+ ctx.shadowBlur=0;ctx.strokeStyle='#9df8e1';ctx.fillStyle='#9df8e1';ctx.lineWidth=Math.max(2,metrics.cell*.07);
+ if(p.type==='mirror'){ctx.beginPath();if(p.rot===0){ctx.moveTo(-s*.7,s*.7);ctx.lineTo(s*.7,-s*.7)}else{ctx.moveTo(-s*.7,-s*.7);ctx.lineTo(s*.7,s*.7)}ctx.stroke()}
+ else if(p.type==='double'){ctx.font=`900 ${metrics.cell*.3}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('×2',0,1)}
+ else if(p.type==='boost'){ctx.font=`900 ${metrics.cell*.32}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('»',0,0)}
+ else if(p.type==='split'){ctx.rotate(p.rot?Math.PI:0);ctx.beginPath();ctx.moveTo(-s*.72,0);ctx.lineTo(0,0);ctx.lineTo(s*.6,-s*.55);ctx.moveTo(0,0);ctx.lineTo(s*.6,s*.55);ctx.stroke();ctx.fillStyle='#9df8e1';ctx.beginPath();ctx.arc(-s*.72,0,2.5,0,Math.PI*2);ctx.fill()}
+ ctx.restore()}
+
+function ui(){outEl.textContent=currentRate.toFixed(1)+'/s';bestEl.textContent=best.toFixed(1)+'/s';energyEl.textContent=Math.floor(totalEnergy).toLocaleString();activeEl.textContent=particles.length;let target=10,rank='STARTER';if(best>=40){target=100;rank='ENGINEER'}else if(best>=20){target=40;rank='OPTIMIZER'}else if(best>=10){target=20;rank='BUILDER'}goalText.textContent='Target '+target+'/s';rankEl.textContent=rank;goalFill.style.width=Math.min(100,currentRate/target*100)+'%'}
+function frame(now){const dt=Math.min(40,now-last);last=now;update(dt,now);draw();ui();requestAnimationFrame(frame)}requestAnimationFrame(frame);
+
+function resetMachine(){placed.clear();particles=[];collected.length=0;trailBursts=[];inv={...START_INV};currentRate=0;best=0;totalEnergy=0;try{localStorage.removeItem('efficient_machine_v01')}catch(e){} updateTools();showToast('Fresh machine');save()}
+document.getElementById('clearBtn').onclick=()=>{if(confirm('Start a completely new machine?'))resetMachine()};
+document.getElementById('hintBtn').onclick=()=>{showToast('Try ×2 on the direct line, then use SPLIT + mirrors to bring a second stream home.')};
+setTimeout(()=>showToast(placed.size?'Keep optimizing':'Direct route = ~1.5/s. Beat it.'),500);
+})();
+</script>
+</body>
+</html>
