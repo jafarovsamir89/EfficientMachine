@@ -34,13 +34,13 @@ jobs:
           mkdir -p "$ANDROID_SDK_ROOT"
 
           curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh | bash
-          export PATH="$HOME/.local/bin:$PATH"
-
+          export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
           ANDROID_CLI="$(command -v android)"
+
           echo "Android CLI: $ANDROID_CLI"
           "$ANDROID_CLI" --version
           "$ANDROID_CLI" --sdk="$ANDROID_SDK_ROOT" sdk list 'platforms/android-37' --all --canary
-          yes | "$ANDROID_CLI" --sdk="$ANDROID_SDK_ROOT" sdk install --canary \
+          "$ANDROID_CLI" --sdk="$ANDROID_SDK_ROOT" sdk install --canary \
             platforms/android-37 \
             build-tools/37.0.0 \
             platform-tools
